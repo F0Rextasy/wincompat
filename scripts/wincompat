@@ -1,0 +1,274 @@
+#!/usr/bin/env python3
+"""wincompat -- catch repository paths that break Windows checkouts.
+
+DOS device names (NUL, CON, ...), case-only collisions, trailing dots and
+spaces, illegal characters, over-long paths: git checkout on Windows fails
+or silently rewrites these, while Linux CI stays green. Deterministic path
+rules -- no model, no network. Exit 1 when a path fails the gate.
+
+Scan sources, in order: --paths-file (newline list, - for stdin), else
+git ls-files over [path], else a working-tree walk when not a repo.
+"""
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+
+RESERVED = ({"con", "prn", "aux", "nul"}
+            | {"com%d" % i for i in range(10)}
+            | {"lpt%d" % i for i in range(10)})
+ILLEGAL = set('<>:"|?*') | {chr(c) for c in range(32)}
+MAX_PATH = 259
+DEFAULT_EXCLUDE = {".git", "node_modules", "__pycache__", ".venv", "venv"}
+
+RULES = {
+    "reserved-name": (
+        "fail",
+        "rename it -- Windows treats the DOS device name as a device, "
+        "with any extension"),
+    "case-collision": (
+        "fail",
+        "rename one of them -- Windows/macOS checkouts keep only one, "
+        "Linux keeps both"),
+    "trailing-dot": (
+        "fail", "remove the trailing dot -- Windows strips it silently"),
+    "trailing-space": (
+        "fail", "remove the trailing space -- Windows strips it silently"),
+    "illegal-char": (
+        "fail",
+        "rename without <>:\"|?* or control characters -- git checkout "
+        "fails on Windows"),
+    "path-too-long": (
+        "warn",
+        "shorten the path or enable long-path support on every machine"),
+}
+
+BOLD = "\033[1m"
+RED = "\033[31m"
+YELLOW = "\033[33m"
+DIM = "\033[2m"
+RESET = "\033[0m"
+
+
+def paint(text, *codes, color=True):
+    if not color:
+        return text
+    return "".join(codes) + text + RESET
+
+
+def name_findings(path, components=True):
+    """Per-component name rules for one path (dirs break too)."""
+    findings = []
+    parts = [p for p in path.replace("\\", "/").split("/") if p]
+    for part in parts:
+        stem = part.split(".", 1)[0].lower()
+        if stem in RESERVED:
+            findings.append((
+                "reserved-name",
+                "DOS device name '%s' -- checkout fails on Windows" % part))
+        if part.endswith("."):
+            findings.append((
+                "trailing-dot",
+                "'%s' ends with a dot -- Windows strips it" % part))
+        if part.endswith(" "):
+            findings.append((
+                "trailing-space",
+                "'%s' ends with a space -- Windows strips it" % part))
+        bad = sorted({c for c in part if c in ILLEGAL})
+        if bad:
+            shown = ", ".join(repr(c) for c in bad)
+            findings.append((
+                "illegal-char",
+                "'%s' contains %s -- git checkout fails on Windows"
+                % (part, shown)))
+    if len(path) > MAX_PATH:
+        findings.append((
+            "path-too-long",
+            "%d characters -- beyond MAX_PATH (260)" % len(path)))
+    return findings
+
+
+def case_collisions(paths):
+    """One finding per lowercased key owned by two spellings.
+
+    Checks every ancestor prefix, so `Docs/a` vs `docs/b` collides at the
+    directory level where Windows would drop one of them."""
+    variants = {}
+    for path in paths:
+        parts = [p for p in path.replace("\\", "/").split("/") if p]
+        for i in range(1, len(parts) + 1):
+            actual = "/".join(parts[:i])
+            variants.setdefault(actual.lower(), set()).add(actual)
+    findings = []
+    for owners in sorted(variants.values(), key=lambda s: sorted(s)[0].lower()):
+        if len(owners) < 2:
+            continue
+        first, second = sorted(owners)
+        findings.append((
+            "case-collision",
+            "'%s' vs '%s' -- one platform wins, the other loses"
+            % (first, second),
+            first))
+    return findings
+
+
+def scan(paths, allow):
+    """-> (findings, counts). Findings: dict rows, exempt counted apart."""
+    exempt_rules = set(allow)
+    rows = []
+    exempt = 0
+    for path in sorted(paths):
+        for rule, message in name_findings(path):
+            if rule in exempt_rules:
+                exempt += 1
+                continue
+            severity, suggestion = RULES[rule]
+            rows.append({"file": path, "line": 0, "rule": rule,
+                         "severity": severity, "message": message,
+                         "suggestion": suggestion})
+    for rule, message, rep in case_collisions(paths):
+        if rule in exempt_rules:
+            exempt += 1
+            continue
+        severity, suggestion = RULES[rule]
+        rows.append({"file": rep, "line": 0, "rule": rule,
+                     "severity": severity, "message": message,
+                     "suggestion": suggestion})
+    counts = {"checked": len(paths),
+              "fail": sum(1 for r in rows if r["severity"] == "fail"),
+              "warn": sum(1 for r in rows if r["severity"] == "warn"),
+              "exempt": exempt}
+    return rows, counts
+
+
+def load_paths(args):
+    """(paths, source) or exits2 with a usage message."""
+    if args.paths_file:
+        if args.path != ".":
+            print("wincompat: --paths-file and a path argument are "
+                  "mutually exclusive", file=sys.stderr)
+            sys.exit(2)
+        if args.paths_file == "-":
+            raw = sys.stdin.read()
+        else:
+            try:
+                with open(args.paths_file, encoding="utf-8") as handle:
+                    raw = handle.read()
+            except OSError as exc:
+                print("wincompat: cannot read paths file: %s" % exc,
+                      file=sys.stderr)
+                sys.exit(2)
+        # splitlines already drops \r\n endings; keep trailing spaces -- they
+        # are themselves a finding
+        lines = raw.splitlines()
+        return [l for l in lines if l and not l.startswith("#")], "paths-file"
+    if not os.path.isdir(args.path):
+        print("wincompat: not a directory: %s" % args.path, file=sys.stderr)
+        sys.exit(2)
+    if not args.walk:
+        try:
+            proc = subprocess.run(
+                ["git", "ls-files", "-z"], cwd=args.path,
+                capture_output=True, timeout=30)
+            if proc.returncode == 0:
+                tracked = [p.decode("utf-8", "replace")
+                           for p in proc.stdout.split(b"\0") if p]
+                return tracked, "git"
+        except (OSError, subprocess.SubprocessError):
+            pass
+        print("wincompat: not a git repository (or git missing) -- "
+              "scanning the working tree", file=sys.stderr)
+    found = []
+    for root, dirs, names in os.walk(args.path):
+        dirs[:] = sorted(d for d in dirs if d not in DEFAULT_EXCLUDE)
+        rel_root = os.path.relpath(root, args.path)
+        for name in sorted(names):
+            found.append(name if rel_root == "."
+                         else "/".join(rel_root.replace(os.sep, "/").split("/")
+                                       + [name]))
+    return found, "walk"
+
+
+def render(rows, counts, allow, source, strict, color):
+    width = min(34, max([len(r["file"]) for r in rows] or [8]))
+    for row in rows:
+        severity = row["severity"]
+        label = "FAIL" if severity == "fail" else "WARN"
+        codes = (RED, BOLD) if severity == "fail" else (YELLOW, BOLD)
+        print("%-*s  %s  %-15s %s"
+              % (width, row["file"], paint(label, *codes, color=color),
+                 row["rule"], row["message"]))
+    if rows:
+        print()
+    tail = "%d paths scanned (%s)" % (counts["checked"], source)
+    if counts["exempt"]:
+        tail += ", %d exempt by --allow" % counts["exempt"]
+    if counts["fail"]:
+        print(paint("wincompat: %d failure(s), %d warning(s) -- %s"
+                    % (counts["fail"], counts["warn"], tail),
+                    BOLD, RED, color=color))
+        print(paint("wincompat: rename the path -- or exempt the rule with: "
+                    " --allow RULE=<reason>", BOLD, color=color))
+    else:
+        print(paint("wincompat: ok -- %d failure(s), %d warning(s) -- %s"
+                    % (counts["fail"], counts["warn"], tail),
+                    BOLD, color=color))
+    if strict and counts["warn"]:
+        print(paint("wincompat: --strict blocks on %d warning(s)"
+                    % counts["warn"], BOLD, RED, color=color))
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        prog="wincompat",
+        description="Catch repository paths that break Windows checkouts: "
+                    "DOS device names, case collisions, trailing dots, "
+                    "illegal characters.")
+    parser.add_argument("path", default=".", nargs="?",
+                        help="repository root to scan (default .)")
+    parser.add_argument("--walk", action="store_true",
+                        help="scan the working tree even inside a git repo")
+    parser.add_argument("--paths-file", metavar="FILE",
+                        help="newline path list to scan instead "
+                             "('-' for stdin); excludes 'path'")
+    parser.add_argument("--allow", action="append", default=[],
+                        metavar="RULE=reason",
+                        help="exempt one rule with a reason (repeatable)")
+    parser.add_argument("--strict", action="store_true",
+                        help="warnings (path-too-long) block too")
+    parser.add_argument("--format", choices=("text", "json"), default="text")
+    parser.add_argument("--no-color", action="store_true")
+    args = parser.parse_args(argv)
+
+    allow = {}
+    for entry in args.allow:
+        if "=" not in entry:
+            print("wincompat: --allow expects RULE=reason, got: %s" % entry,
+                  file=sys.stderr)
+            sys.exit(2)
+        rule, reason = entry.split("=", 1)
+        if rule not in RULES or not reason.strip():
+            print("wincompat: unknown rule or empty reason in: %s" % entry,
+                  file=sys.stderr)
+            sys.exit(2)
+        allow[rule] = reason
+
+    paths, source = load_paths(args)
+    rows, counts = scan(paths, allow)
+    ok = counts["fail"] == 0 and not (args.strict and counts["warn"] > 0)
+    if args.format == "json":
+        print(json.dumps({"ok": ok, "counts": counts, "source": source,
+                          "findings": rows,
+                          "exempt": [{"rule": r, "reason": why}
+                                     for r, why in sorted(allow.items())]},
+                         indent=2))
+    else:
+        render(rows, counts, allow, source, args.strict, not args.no_color)
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

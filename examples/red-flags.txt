@@ -1,0 +1,7 @@
+# one repository path per line -- '#' lines are comments
+NUL.txt
+src/aux/settings.json
+README.md
+readme.md
+release.md.
+docs/api:v1.md

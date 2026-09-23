@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1035" height="264" viewBox="0 0 1035 264" font-family="'Cascadia Mono','Cascadia Code',Consolas,'DejaVu Sans Mono',monospace">
+<defs><clipPath id="c"><rect x="0" y="40" width="1035" height="224" rx="0"/></clipPath></defs>
+<rect width="1035" height="264" rx="10" fill="#0d1117"/>
+<path d="M0 10 A10 10 0 0 1 10 0 H1025 A10 10 0 0 1 1035 10 V40 H0 Z" fill="#161b22"/>
+<line x1="0" y1="40" x2="1035" y2="40" stroke="#30363d"/>
+<circle cx="20" cy="20" r="6.5" fill="#ff5f56"/>
+<circle cx="42" cy="20" r="6.5" fill="#ffbd2e"/>
+<circle cx="64" cy="20" r="6.5" fill="#27c93f"/>
+<text x="517" y="25" font-size="12.5" fill="#8b949e" text-anchor="middle">wincompat  --  examples/red-flags.txt</text>
+<text x="22" y="68" font-size="15" fill="#ff7b72" xml:space="preserve">NUL.txt                FAIL  reserved-name   DOS device name 'NUL.txt' -- checkout fails on Windows</text>
+<text x="22" y="90" font-size="15" fill="#ff7b72" xml:space="preserve">docs/api:v1.md         FAIL  illegal-char    'api:v1.md' contains ':' -- git checkout fails on Windows</text>
+<text x="22" y="112" font-size="15" fill="#ff7b72" xml:space="preserve">release.md.            FAIL  trailing-dot    'release.md.' ends with a dot -- Windows strips it</text>
+<text x="22" y="134" font-size="15" fill="#ff7b72" xml:space="preserve">src/aux/settings.json  FAIL  reserved-name   DOS device name 'aux' -- checkout fails on Windows</text>
+<text x="22" y="156" font-size="15" fill="#ff7b72" xml:space="preserve">README.md              FAIL  case-collision  'README.md' vs 'readme.md' -- one platform wins, the other loses</text>
+<text x="22" y="200" font-size="15" fill="#e6edf3" font-weight="600" xml:space="preserve">wincompat: 5 failure(s), 0 warning(s) -- 6 paths scanned (paths-file)</text>
+<text x="22" y="222" font-size="15" fill="#c9d1d9" xml:space="preserve">wincompat: rename the path -- or exempt the rule with:  --allow RULE=&lt;reason&gt;</text>
+<text x="22" y="244" font-size="15" fill="#ff7b72" font-weight="600" xml:space="preserve">[exit 1]</text>
+</svg>

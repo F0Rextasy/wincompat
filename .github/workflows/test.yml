@@ -1,0 +1,22 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: contract tests
+        run: python -m unittest discover -s tests -v
+      - name: our own tree must be checkout-safe
+        run: python scripts/wincompat . --strict --no-color
+      - name: a red path list must be caught
+        run: |
+          printf 'NUL.txt\nreadme.md\nREADME.md\n' > /tmp/red.txt
+          python scripts/wincompat --paths-file /tmp/red.txt --no-color || test $? -eq 1
