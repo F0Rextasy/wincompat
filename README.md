@@ -156,11 +156,13 @@ deliberately red list must exit 1.
 - **"Fix" the tree itself.** Renaming a live `nul` on Windows deletes a
   device, not a file - the tool reports, you rename from where it's safe.
 
-## One path, many gates - the family
+## One path, many gates — the family
 
 | Repo | What its verdict means |
-| --- | --- |
+| --- | ---|
 | [dsh-gate](https://github.com/F0Rextasy/dsh-gate) | the shell session actually ran - real commands, real files, real log |
+| [sessionaudit](https://github.com/F0Rextasy/sessionaudit) | the session behaved - scope, secrets, destructive acts, self-contradicted claims |
+| [cigate](https://github.com/F0Rextasy/cigate) | the workflows burn each minute once - pins, path filters, dedup, budget |
 | [ci-triage](https://github.com/F0Rextasy/ci-triage) | one log, one verdict: regression / flaky / infra / pass |
 | [docproof](https://github.com/F0Rextasy/docproof) | every README doc snippet is runnable, parsed, and verified in CI |
 | [preflight](https://github.com/F0Rextasy/preflight) | the config is safe to ship - semantics, not syntax |
@@ -168,7 +170,11 @@ deliberately red list must exit 1.
 | [shipcheck](https://github.com/F0Rextasy/shipcheck) | the artifacts in `dist/` match `src/` - nothing stale ships |
 | [testgate](https://github.com/F0Rextasy/testgate) | the tests that ran are the tests that exist - gaps, dupes, skips |
 | [bandaid](https://github.com/F0Rextasy/bandaid) | the diff doesn't hide a silent failure - swallowed errors, dead guards |
-| **wincompat** | every path in the tree survives a Windows checkout |
+| [wincompat](https://github.com/F0Rextasy/wincompat) | every path in the tree survives a Windows checkout |
+| [compressproof](https://github.com/F0Rextasy/compressproof) | the context shrank without losing an answer - reversible compression, byte proof, answer-equivalence oracle |
+| [uigate](https://github.com/F0Rextasy/uigate) | the UI stops looking like the same AI slop - measurable design-slop lint, WCAG + template tells |
+| [aitell](https://github.com/F0Rextasy/aitell) | the prose stops reading as AI - deterministic AI-tell detection with a published confusion matrix |
+| [route-drift](https://github.com/F0Rextasy/route-drift) | OpenAPI spec vs code routes drift gate |
 
 MIT licensed. Contributed findings welcome - attach the path pattern and
 the checkout error.
